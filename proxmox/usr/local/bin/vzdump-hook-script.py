@@ -3,17 +3,7 @@
 Proxmox VZDump Backup Hook Script with Healthchecks.io integration.
 
 This script runs at various phases of the Proxmox Backup task to monitor
-and report backup status to Healthchecks.io or self-hosted
-
-Author: Cédric MARCOUX
-Localisation : Aywaille, Belgium
-Version: 1.0.2
-
-Release Notes:
-- **1.0.2 (2025-03-14)**:
-  - tag sorting
-- **1.0.0 (2025-03-12)**:
-  - Initial release
+and report backup status to Healthchecks.io.
 
 Installation:
 1. Place this script at: /usr/local/bin/vzdump-hook-script.py
@@ -23,10 +13,10 @@ Installation:
    - Add to /etc/pve/jobs.cfg: script /usr/local/bin/vzdump-hook-script.py
 
 Environment variables can be configured in /etc/pve/healthchecks/variables.env:
-    HC_BASE_DOMAIN=https://healthchecks.mydomain.com or <self-hosted url>
-    HC_PING_DOMAIN=https://healthchecks.mydomain.com/ping or <self-hosted url>/ping
-    HC_RW_API_KEY=<your project read-write api key>
-    HC_PING_KEY=<your project ping key>
+    HC_BASE_DOMAIN=https://healthchecks.example.com
+    HC_PING_DOMAIN=https://healthchecks.example.com/ping
+    HC_RW_API_KEY=your_api_key
+    HC_PING_KEY=your_ping_key
 
 Job execution flow:
 UPID:$node:$pid:$pstart:$starttime:$dtype:$id:$user
@@ -48,8 +38,8 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any, Union
 
 # Default configuration
-DEFAULT_HC_BASE_DOMAIN = "https://healthchecks.mydomain.com"
-DEFAULT_HC_PING_DOMAIN = "https://healthchecks.mydomain.com/ping"
+DEFAULT_HC_BASE_DOMAIN = "https://healthchecks.cmbc.be"
+DEFAULT_HC_PING_DOMAIN = "https://healthchecks.cmbc.be/ping"
 DEFAULT_HC_RW_API_KEY = "eJy4I0V41OJ7jM1tQy5gjtBgyJ9mz1Kd"
 DEFAULT_HC_PING_KEY = "oiB2qNQV2uGsYSxQAo3rxA"
 DEFAULT_ERROR_CODE = 666
@@ -219,6 +209,7 @@ def get_domain() -> str:
         return "local"
 
 HC_SLUG_SUFFIX = f"{NODE.lower()}.{CLUSTER.lower()}.{get_domain().lower()}"
+HC_VM_SLUG_SUFFIX = f"{CLUSTER.lower()}.{get_domain().lower()}"
 HC_HOST_SLUG_PREFIX = "job"
 
 # Process command line arguments
@@ -262,9 +253,10 @@ def slugify(text: str, suffix: str = "") -> str:
     return text
 
 # Function to get the dashboard URL from a slug
-def get_dashboard_url(slug: str, apikey: str, base_url: str = "https://healthchecks.io") -> str:
+def get_dashboard_url(slug: str, apikey: str, base_url: str = "https://healthchecks.io",
+                      slug_suffix: str = "") -> str:
     """Get the dashboard URL from a slug."""
-    slug = slugify(slug, HC_SLUG_SUFFIX)
+    slug = slugify(slug, slug_suffix or HC_SLUG_SUFFIX)
     url = f"{base_url}/api/v3/checks/?slug={slug}"
     
     try:
@@ -280,7 +272,7 @@ def get_dashboard_url(slug: str, apikey: str, base_url: str = "https://healthche
         return dashboard_url
     
     except Exception as e:
-        error("Get Dashboard URL", str(e))
+        warn("Get Dashboard URL", str(e))
         return ""
 
 # Functions to create tags
@@ -338,21 +330,22 @@ def add_tag_from_cmd(key: str, *cmd_args) -> Optional[str]:
         return None
 
 # Fonction pour créer ou mettre à jour un endpoint Healthchecks
-def hc_create(name: str, slug_prefix: str, grace: int = 3600, description: str = "", 
-              tags: str = "", channels: str = "*", timeout: int = 86400, 
-              apikey: str = HC_RW_API_KEY, url: str = HC_BASE_DOMAIN) -> None:
+def hc_create(name: str, slug_prefix: str, grace: int = 3600, description: str = "",
+              tags: str = "", channels: str = "*", timeout: int = 86400,
+              apikey: str = HC_RW_API_KEY, url: str = HC_BASE_DOMAIN,
+              slug_suffix: str = "") -> None:
     """Crée ou met à jour un endpoint Healthchecks."""
     if not name:
         error("HC Create", "Name parameter is required")
-    
+
     if not slug_prefix:
         error("HC Create", "Slug prefix parameter is required")
-    
+
     if not apikey:
         error("HC Create", "API key is required")
-    
+
     # Construire le slug complet
-    slug = slugify(slug_prefix, HC_SLUG_SUFFIX)
+    slug = slugify(slug_prefix, slug_suffix or HC_SLUG_SUFFIX)
     
     # Récupérer le fuseau horaire
     try:
@@ -386,33 +379,34 @@ def hc_create(name: str, slug_prefix: str, grace: int = 3600, description: str =
         headers = {"X-Api-Key": apikey}
         response = requests.post(api_url, headers=headers, json=payload, timeout=10)
         response.raise_for_status()
-        
+
         # Vérifier que la réponse est un JSON valide
         response.json()
     except requests.exceptions.RequestException as e:
-        error("Healthcheck Creation", str(e))
+        warn("Healthcheck Creation", str(e))
 
 # Fonction pour envoyer un ping à un endpoint Healthchecks
 def hc_ping(slug_prefix: str, report: str = "", file: str = "", data: str = "",
-            pingkey: str = HC_PING_KEY, url: str = HC_PING_DOMAIN) -> None:
+            pingkey: str = HC_PING_KEY, url: str = HC_PING_DOMAIN,
+            slug_suffix: str = "") -> None:
     """Envoie un ping à un endpoint Healthchecks."""
     if not slug_prefix:
         error("HC Ping", "Slug prefix parameter is required")
-    
+
     if not pingkey:
         error("HC Ping", "Ping key is required")
-    
+
     # Vérifier que le rapport est valide
     valid_reports = ["", "start", "fail", "log"]
     if report and report not in valid_reports and not report.isdigit():
         error("HC Ping", f"Report status must be blank, start, fail, log, or a positive number. Got - '{report}'")
-    
+
     # Vérifier que file et data ne sont pas tous les deux fournis
     if file and data:
         error("HC Ping", "File and Data arguments are mutually exclusive")
-    
+
     # Construire le slug complet
-    slug = slugify(slug_prefix, HC_SLUG_SUFFIX)
+    slug = slugify(slug_prefix, slug_suffix or HC_SLUG_SUFFIX)
     
     # Construire l'URL complet
     ping_url = f"{url}/{pingkey}/{slug}"
@@ -449,7 +443,8 @@ def hc_ping(slug_prefix: str, report: str = "", file: str = "", data: str = "",
         response.raise_for_status()
         return response.url
     except requests.exceptions.RequestException as e:
-        error(f"Healthcheck Ping w/Data ({report or 'success'})", str(e))
+        warn(f"Healthcheck Ping w/Data ({report or 'success'})", str(e))
+        return None
 
 # Vérifier que jq est installé
 def check_jq_installed() -> None:
@@ -482,26 +477,22 @@ def main() -> None:
     check_jq_installed()
     
     if PHASE == "job-init":
-        # Create the Healthchecks endpoint for the host
+        # Créer l'endpoint Healthchecks pour l'hôte
         tags = ""
         
-        # For host, add cluster and kernel tags
-        cluster_tag = add_tag("cluster", CLUSTER)
-        if cluster_tag:
-            tags += cluster_tag
-            
-        # Add kernel tag using the uname command
-        try:
-            kernel_cmd = "uname --kernel-release"
-            kernel_result = subprocess.run(kernel_cmd, shell=True, capture_output=True, text=True)
-            kernel_version = kernel_result.stdout.strip()
-            kernel_tag = add_tag("kernel", kernel_version)
-            if kernel_tag:
-                tags += kernel_tag
-        except Exception as e:
-            warn("Kernel tag", str(e))
-
-        # Get node description
+        # Ajouter des tags
+        for tag_data in [
+            add_tag("cluster", CLUSTER),
+            add_tag("node", os.environ.get("HOSTNAME", "")),
+            add_tag("storage", STORAGE),
+            add_tag_from_file("/etc/machine-id"),
+            add_tag_from_cmd("arch", "uname", "--machine"),
+            add_tag_from_cmd("kernel", "uname", "--kernel-release")
+        ]:
+            if tag_data:
+                tags += tag_data
+        
+        # Récupérer la description du nœud
         try:
             cmd = "grep '^#' /etc/pve/local/config | sed 's/^#//'"
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
@@ -519,27 +510,30 @@ def main() -> None:
         )
     
     elif PHASE == "job-start":
-        # Send a start ping to the host endpoint
+        # Envoyer un ping de démarrage à l'endpoint de l'hôte
         info(f"{PHASE} -- Ping Host Start")
         hc_ping(HC_HOST_SLUG_PREFIX, "start")
     
     elif PHASE == "backup-start":
-        # Create and start the Healthchecks endpoint for the VM/container
-        # and send a log ping to the host endpoint
+        # Créer et démarrer l'endpoint Healthchecks pour la VM/LXC
+        # et envoyer un ping de journal à l'endpoint de l'hôte
         tags = ""
         
-        # Add only cluster, node, storage, and vmtype tags for VM/container
-        for tag_name, tag_value in [
-            ("cluster", CLUSTER),
-            ("node", NODE),
-            ("storage", STORAGE),
-            ("vmtype", VMTYPE)
+        # Ajouter des tags
+        for tag_data in [
+            add_tag("cluster", CLUSTER),
+            add_tag_from_cmd("node", "hostname"),
+            add_tag("storage", STORAGE),
+            add_tag("mode", MODE),
+            add_tag("vmid", VMID),
+            add_tag("hostname", os.environ.get("HOSTNAME", "")),
+            add_tag("type", os.environ.get("HOSTTYPE", "")),
+            add_tag("vmtype", VMTYPE)
         ]:
-            tag = add_tag(tag_name, tag_value)
-            if tag:
-                tags += tag
+            if tag_data:
+                tags += tag_data
         
-        # Get VM/container description
+        # Récupérer la description de la VM/LXC
         description = ""
         if VMTYPE == "qemu":
             try:
@@ -558,87 +552,88 @@ def main() -> None:
         
         info(f"{PHASE} -- Create {os.environ.get('HOSTNAME', 'unknown')} Endpoint")
         
-        # Create endpoint for VM/container
+        # Créer l'endpoint pour la VM/LXC
         domain_cmd = "hostname --domain"
         domain_result = subprocess.run(domain_cmd, shell=True, capture_output=True, text=True)
         domain = domain_result.stdout.strip()
         
         hc_create(
-            name=f"{NODE}.{domain}.{VMTYPE}.{VMID}.{os.environ.get('HOSTNAME', 'unknown')}",
+            name=f"{CLUSTER}.{domain}.{VMTYPE}.{VMID}.{os.environ.get('HOSTNAME', 'unknown')}",
             slug_prefix=HC_VM_SLUG_PREFIX,
             grace=3600,
             description=description,
-            tags=tags
+            tags=tags,
+            slug_suffix=HC_VM_SLUG_SUFFIX
         )
-        
+
         info(f"{PHASE} -- Ping {VMTYPE} start")
-        hc_ping(HC_VM_SLUG_PREFIX, "start")
-        
+        hc_ping(HC_VM_SLUG_PREFIX, "start", slug_suffix=HC_VM_SLUG_SUFFIX)
+
         info(f"{PHASE} -- Ping Host Log")
         hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
     
     elif PHASE in ["pre-stop", "pre-restart", "post-restart"]:
-        # Send a log ping to VM/container and host endpoints
+        # Envoyer un ping de journal aux endpoints de la VM/LXC et de l'hôte
         info(f"{PHASE} -- Ping {VMTYPE} Log")
-        hc_ping(HC_VM_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
-        
+        hc_ping(HC_VM_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}", slug_suffix=HC_VM_SLUG_SUFFIX)
+
         info(f"{PHASE} -- Ping Host Log")
         hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
     
     elif PHASE == "backup-end":
-        # Send a success ping to VM/container endpoint
-        # and a log ping to host endpoint
+        # Envoyer un ping de succès à l'endpoint de la VM/LXC
+        # et un ping de journal à l'endpoint de l'hôte
         info(f"{PHASE} -- Ping {VMTYPE} Success")
-        hc_ping(HC_VM_SLUG_PREFIX, data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
-        
+        hc_ping(HC_VM_SLUG_PREFIX, data=f"{PHASE}: {HC_VM_SLUG_PREFIX}", slug_suffix=HC_VM_SLUG_SUFFIX)
+
         info(f"{PHASE} -- Ping Host Log")
         hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
     
     elif PHASE == "backup-abort":
-        # Send a fail ping to VM/container endpoint
-        # and a log ping to host endpoint
+        # Envoyer un ping d'échec à l'endpoint de la VM/LXC
+        # et un ping de journal à l'endpoint de l'hôte
         info(f"{PHASE} -- Ping {VMTYPE} fail")
-        hc_ping(HC_VM_SLUG_PREFIX, "fail", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
-        
+        hc_ping(HC_VM_SLUG_PREFIX, "fail", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}", slug_suffix=HC_VM_SLUG_SUFFIX)
+
         info(f"{PHASE} -- Ping Host Log")
         hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
-        
-        url = get_dashboard_url(HC_VM_SLUG_PREFIX, HC_RW_API_KEY, HC_BASE_DOMAIN)
+
+        url = get_dashboard_url(HC_VM_SLUG_PREFIX, HC_RW_API_KEY, HC_BASE_DOMAIN, slug_suffix=HC_VM_SLUG_SUFFIX)
         with open(ERRLOG, "a") as f:
             f.write(f"{TASK_ID} - {VMID} - Backup Abort - {url}\n")
         print(f"{TASK_ID} - {VMID} - Backup Abort - {url}")
     
     elif PHASE == "log-end":
-        # Send a log ping to VM/container endpoint
-        # with log file content
+        # Envoyer un ping de journal à l'endpoint de la VM/LXC
+        # avec le contenu du fichier journal
         info(f"LOGFILE: {LOGFILE}")
         info(f"{PHASE} -- Ping {VMTYPE} Log")
         
         try:
-            # Filter log to exclude MESG and OKhttp lines
+            # Filtrer le journal pour ne pas inclure les lignes MESG et OKhttp
             cmd = f"grep -v 'MESG' {LOGFILE} | grep -v 'OKhttp'"
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
             backup_log = result.stdout
             
-            hc_ping(HC_VM_SLUG_PREFIX, "log", data=backup_log)
+            hc_ping(HC_VM_SLUG_PREFIX, "log", data=backup_log, slug_suffix=HC_VM_SLUG_SUFFIX)
         except Exception as e:
             error("Read Log File", str(e))
     
     elif PHASE == "job-end":
-        # Send a success or fail ping to host endpoint
+        # Envoyer un ping de succès ou d'échec à l'endpoint de l'hôte
         if ERRLOG.exists():
             with open(ERRLOG, "r") as f:
                 job_log = f.read()
             
             info(f"{PHASE} -- Ping Host Fail")
             hc_ping(HC_HOST_SLUG_PREFIX, "fail", data=job_log)
-            ERRLOG.unlink()  # Delete error log file
+            ERRLOG.unlink()  # Supprimer le fichier d'erreur
         else:
             info(f"{PHASE} -- Ping Host Success")
             hc_ping(HC_HOST_SLUG_PREFIX, data=TASK_ID)
     
     elif PHASE == "job-abort":
-        # Send a fail ping to host endpoint
+        # Envoyer un ping d'échec à l'endpoint de l'hôte
         info(f"{PHASE} -- Ping Host Fail")
         with open(ERRLOG, "a") as f:
             f.write(f"{TASK_ID} - Job Abort\n")
@@ -649,7 +644,7 @@ def main() -> None:
         hc_ping(HC_HOST_SLUG_PREFIX, "fail", data=job_log)
     
     else:
-        # Unknown phase, send a fail ping to host endpoint
+        # Phase inconnue, envoyer un ping d'échec à l'endpoint de l'hôte
         info(f"{PHASE} -- Ping Host Fail")
         hc_ping(HC_HOST_SLUG_PREFIX, "fail", data=f"UNKNOWN: {PHASE}")
         warn("Unknown Phase", PHASE)
