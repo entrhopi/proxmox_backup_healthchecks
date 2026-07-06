@@ -38,12 +38,12 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any, Union
 
 # Default configuration
-DEFAULT_HC_BASE_DOMAIN = "https://healthchecks.cmbc.be"
-DEFAULT_HC_PING_DOMAIN = "https://healthchecks.cmbc.be/ping"
-DEFAULT_HC_RW_API_KEY = "eJy4I0V41OJ7jM1tQy5gjtBgyJ9mz1Kd"
-DEFAULT_HC_PING_KEY = "oiB2qNQV2uGsYSxQAo3rxA"
+DEFAULT_HC_BASE_DOMAIN = "https://healthchecks.io"
+DEFAULT_HC_PING_DOMAIN = "https://hc-ping.com"
+DEFAULT_HC_RW_API_KEY = ""
+DEFAULT_HC_PING_KEY = ""
 DEFAULT_ERROR_CODE = 666
-ENV_FILE = "/etc/pve/healthchecks/variables.env"
+ENV_FILE = os.path.dirname(os.path.abspath(__file__)) + "/vzdump-hook-script.env"
 
 # Load environment variables from file
 def load_env_file(file_path=ENV_FILE):
