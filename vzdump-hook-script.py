@@ -282,16 +282,14 @@ def add_tag(key: str, value: str) -> Optional[str]:
         error("Key Validation", "Empty key")
         return None
     
+    # Optional tags are skipped silently: an absent value is not an error,
+    # and warn() writes to ERRLOG, which would mark the whole job as failed.
+    value = (value or "").strip()
     if not value:
-        warn("Value Validation", "Empty value")
         return None
     
-    # Check that the value contains useful characters
-    if value.strip():
-        # Normalize the tag
-        return f" {key}={value.replace(' ', '_')}"
-    
-    return None
+    # Normalize the tag
+    return f" {key}={value.replace(' ', '_')}"
 
 def add_tag_from_file(filepath: str, key: str = "") -> Optional[str]:
     """Create a tag from a file's content."""
