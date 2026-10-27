@@ -142,6 +142,12 @@ You can customize the script behavior by modifying the variables in `/etc/pve/he
 - `HC_PING_DOMAIN`: URL for sending pings (usually `HC_BASE_DOMAIN/ping`)
 - `HC_RW_API_KEY`: API key with read-write permissions
 - `HC_PING_KEY`: Key used for sending pings
+- `HC_HOST_GRACE`: (optional) Grace period in seconds for the host backup job endpoint (default `7200`)
+- `HC_HOST_TIMEOUT`: (optional) Maximum run time in seconds for the host backup job endpoint (default `86400`)
+- `HC_VM_GRACE`: (optional) Grace period in seconds for each VM/LXC endpoint (default `3600`)
+- `HC_VM_TIMEOUT`: (optional) Maximum run time in seconds for each VM/LXC endpoint (default `86400`)
+
+The grace period is how long a check may be silent before Healthchecks marks it as failing. The timeout is the maximum time a backup is allowed to run. Any of these can be left unset to fall back to the defaults above.
 
 ## Upgrading
 

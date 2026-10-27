@@ -43,6 +43,14 @@ DEFAULT_HC_PING_DOMAIN = "https://hc-ping.com"
 DEFAULT_HC_RW_API_KEY = ""
 DEFAULT_HC_PING_KEY = ""
 DEFAULT_ERROR_CODE = 666
+
+# Default grace (seconds) and timeout (seconds) per endpoint type.
+# Grace is how long a check may be silent before it is marked as failing;
+# timeout is the maximum time a backup is allowed to run.
+DEFAULT_HC_HOST_GRACE = 7200
+DEFAULT_HC_HOST_TIMEOUT = 86400
+DEFAULT_HC_VM_GRACE = 3600
+DEFAULT_HC_VM_TIMEOUT = 86400
 ENV_FILE = os.path.dirname(os.path.abspath(__file__)) + "/vzdump-hook-script.env"
 
 # Load environment variables from file
@@ -71,11 +79,32 @@ def load_env_file(file_path=ENV_FILE):
 # Load environment variables from the file
 load_env_file()
 
+def get_int_env(name: str, default: int) -> int:
+    """Read an integer environment variable, falling back to default on error.
+
+    A missing value uses the default. An invalid (non-integer) value logs a
+    warning to stderr and uses the default. It deliberately does not write to
+    ERRLOG, since that would mark the whole job as failed.
+    """
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        print(f"WARNING: invalid integer for {name} ({raw!r}), using default {default}",
+              file=sys.stderr)
+        return default
+
 # Get configuration from environment variables or use defaults
 HC_BASE_DOMAIN = os.environ.get("HC_BASE_DOMAIN", DEFAULT_HC_BASE_DOMAIN)
 HC_PING_DOMAIN = os.environ.get("HC_PING_DOMAIN", DEFAULT_HC_PING_DOMAIN)
 HC_RW_API_KEY = os.environ.get("HC_RW_API_KEY", DEFAULT_HC_RW_API_KEY)
 HC_PING_KEY = os.environ.get("HC_PING_KEY", DEFAULT_HC_PING_KEY)
+HC_HOST_GRACE = get_int_env("HC_HOST_GRACE", DEFAULT_HC_HOST_GRACE)
+HC_HOST_TIMEOUT = get_int_env("HC_HOST_TIMEOUT", DEFAULT_HC_HOST_TIMEOUT)
+HC_VM_GRACE = get_int_env("HC_VM_GRACE", DEFAULT_HC_VM_GRACE)
+HC_VM_TIMEOUT = get_int_env("HC_VM_TIMEOUT", DEFAULT_HC_VM_TIMEOUT)
 
 # Command line arguments - these would override environment variables
 def parse_args():
@@ -506,7 +535,8 @@ def main() -> None:
         hc_create(
             name=HC_SLUG_SUFFIX,
             slug_prefix=HC_HOST_SLUG_PREFIX,
-            grace=7200,
+            grace=HC_HOST_GRACE,
+            timeout=HC_HOST_TIMEOUT,
             description=node_description,
             tags=tags
         )
@@ -558,7 +588,8 @@ def main() -> None:
         hc_create(
             name=f"{NODE}.{DOMAIN}.{CLUSTER}.{VMTYPE.lower()}.{VMID}.{os.environ.get('HOSTNAME', 'unknown')}",
             slug_prefix=HC_VM_SLUG_PREFIX,
-            grace=3600,
+            grace=HC_VM_GRACE,
+            timeout=HC_VM_TIMEOUT,
             description=description,
             tags=tags,
             slug_suffix=HC_VM_SLUG_SUFFIX
