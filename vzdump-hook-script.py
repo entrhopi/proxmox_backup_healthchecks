@@ -6,13 +6,14 @@ This script runs at various phases of the Proxmox Backup task to monitor
 and report backup status to Healthchecks.io.
 
 Installation:
-1. Place this script at: /usr/local/bin/vzdump-hook-script.py
-2. Make it executable: chmod +x /usr/local/bin/vzdump-hook-script.py
-3. Create a variables.env file at: /etc/pve/healthchecks/variables.env
+1. Clone the repository to: /etc/pve/healthchecks
+2. Make it executable: chmod +x /etc/pve/healthchecks/vzdump-hook-script.py
+3. Create the config file next to the script: /etc/pve/healthchecks/vzdump-hook-script.env
 4. Configure the script in Proxmox backup jobs:
-   - Add to /etc/pve/jobs.cfg: script /usr/local/bin/vzdump-hook-script.py
+   - Add to /etc/pve/jobs.cfg: script /etc/pve/healthchecks/vzdump-hook-script.py
 
-Environment variables can be configured in /etc/pve/healthchecks/variables.env:
+Environment variables can be configured in the vzdump-hook-script.env file next
+to the script (default), or in another file passed with --env-file:
     HC_BASE_DOMAIN=https://healthchecks.example.com
     HC_PING_DOMAIN=https://healthchecks.example.com/ping
     HC_RW_API_KEY=your_api_key

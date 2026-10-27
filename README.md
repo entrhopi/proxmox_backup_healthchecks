@@ -21,49 +21,39 @@ The script runs at various phases of the Proxmox backup task to monitor and repo
 - Python 3.6 or later (included with Proxmox)
 - Python `requests` library
 - `jq` command-line JSON processor
+- `git`
 - Healthchecks.io account (self-hosted or cloud)
 
 ## Installation
 
-### 1. Clone the repository
+The repository is cloned directly into `/etc/pve/healthchecks`. Everything (script, example configuration, and your configuration) then lives inside the git working tree, which makes upgrades a simple `git pull`. Because `/etc/pve` is synchronized across the cluster, the script and its configuration propagate to every node automatically.
 
-```bash
-git clone https://github.com/yourusername/proxmox-healthchecks-hook.git
-cd proxmox-healthchecks-hook
-```
-
-### 2. Install dependencies
+### 1. Install dependencies
 
 ```bash
 apt-get update
-apt-get install -y python3-requests jq
+apt-get install -y python3-requests jq git
 ```
 
-### 3. Create directories
+### 2. Clone the repository
 
 ```bash
-mkdir -p /etc/pve/healthchecks
+git clone https://github.com/entrhopi/proxmox_backup_healthchecks.git /etc/pve/healthchecks
+chmod +x /etc/pve/healthchecks/vzdump-hook-script.py
 ```
 
-### 4. Copy the script to the executable location
+### 3. Configure environment variables
+
+The script reads its configuration from `vzdump-hook-script.env` located next to the script (i.e. `/etc/pve/healthchecks/vzdump-hook-script.env`). Create it from the bundled example:
 
 ```bash
-cp vzdump-hook-script.py /usr/local/bin/
-chmod +x /usr/local/bin/vzdump-hook-script.py
-```
-
-### 5. Configure environment variables
-
-Create the environment file:
-
-```bash
-cp variables.env.example /etc/pve/healthchecks/variables.env
+cp /etc/pve/healthchecks/vzdump-hook-script.env.example /etc/pve/healthchecks/vzdump-hook-script.env
 ```
 
 Edit the file with your Healthchecks.io details:
 
 ```bash
-nano /etc/pve/healthchecks/variables.env
+nano /etc/pve/healthchecks/vzdump-hook-script.env
 ```
 
 Example configuration:
@@ -71,7 +61,7 @@ Example configuration:
 ```
 # Healthchecks.io Configuration for Proxmox VZDump Backup Hook Script
 # This file is loaded by the vzdump-hook-script.py script
-# This file should be located at /etc/pve/healthchecks/variables.env
+# This file should be located at /etc/pve/healthchecks/vzdump-hook-script.env
 # Since it's in /etc/pve, it will be synchronized across the Proxmox cluster
 
 # Base domain for Healthchecks API
@@ -85,40 +75,46 @@ HC_RW_API_KEY=<your project read-write api key>
 
 # Ping key used for sending pings
 HC_PING_KEY=<your project ping key>
+
+# Optional: grace and timeout (in seconds) for the Healthchecks endpoints.
+# Leave a line commented out to use the built-in default (shown on the right).
+# HC_HOST_GRACE=7200        # host backup job endpoint
+# HC_HOST_TIMEOUT=86400     # host backup job endpoint
+# HC_VM_GRACE=3600          # per-VM/LXC endpoint
+# HC_VM_TIMEOUT=86400       # per-VM/LXC endpoint
 ```
 
-### 6. Add the script to your backup jobs
+The file is listed in the repository's `.gitignore`, so your API keys never end up in git.
+
+### 4. Add the script to your backup jobs
 
 Run this command to automatically add the hook script to all existing VZDump backup jobs:
 
 ```bash
-awk 'BEGIN{job=0;has_script=0}/^vzdump:/{if(job&&!has_script)print"        script /usr/local/bin/vzdump-hook-script.py";job=1;has_script=0;print;next}/script \/usr\/local\/bin\/vzdump-hook-script.py/{has_script=1;print;next}/^[a-zA-Z]/{if(job&&$0!~/^[[:space:]]/) {if(!has_script)print"        script /usr/local/bin/vzdump-hook-script.py";job=0;has_script=0}print;next}{print}END{if(job&&!has_script)print"        script /usr/local/bin/vzdump-hook-script.py"}' /etc/pve/jobs.cfg > /tmp/jobs.cfg.new && sudo cp /tmp/jobs.cfg.new /etc/pve/jobs.cfg
+awk 'BEGIN{job=0;has_script=0}/^vzdump:/{if(job&&!has_script)print"        script /etc/pve/healthchecks/vzdump-hook-script.py";job=1;has_script=0;print;next}/script \/etc\/pve\/healthchecks\/vzdump-hook-script.py/{has_script=1;print;next}/^[a-zA-Z]/{if(job&&$0!~/^[[:space:]]/) {if(!has_script)print"        script /etc/pve/healthchecks/vzdump-hook-script.py";job=0;has_script=0}print;next}{print}END{if(job&&!has_script)print"        script /etc/pve/healthchecks/vzdump-hook-script.py"}' /etc/pve/jobs.cfg > /tmp/jobs.cfg.new && sudo cp /tmp/jobs.cfg.new /etc/pve/jobs.cfg
 ```
-The idea behind is to add to file /etc/pve/jobs.cfg a line with "script /usr/local/bin/vzdump-hook-script.py" under each jobs
+The idea behind this is to add the line "script /etc/pve/healthchecks/vzdump-hook-script.py" under each job in /etc/pve/jobs.cfg
 
-### 7. Verify installation
+### 5. Verify installation
 
 Test the script with:
 
 ```bash
-/usr/local/bin/vzdump-hook-script.py job-init
+/etc/pve/healthchecks/vzdump-hook-script.py job-init
 ```
 
 You should see a new check created in your Healthchecks.io dashboard (or self hosted).
 
 ## Cluster Installation
 
-If you're running a Proxmox cluster:
+If you're running a Proxmox cluster, no extra steps are needed: `/etc/pve` is synchronized across all nodes, so cloning the repository on one node (steps 1-4 above) makes the script and its configuration available on every node. Run the awk command on one node to update all backup jobs.
 
-1. Install the script on each node in the cluster:
-   ```bash
-   cp vzdump-hook-script.py /usr/local/bin/
-   chmod +x /usr/local/bin/vzdump-hook-script.py
-   ```
+If for some reason the files do not appear on the other nodes, clone the repository there as well:
 
-2. The configuration file in `/etc/pve/healthchecks/variables.env` will be automatically synchronized across all nodes in the cluster.
-
-3. Run the awk command on one of the nodes to update all backup jobs.
+```bash
+git clone https://github.com/entrhopi/proxmox_backup_healthchecks.git /etc/pve/healthchecks
+chmod +x /etc/pve/healthchecks/vzdump-hook-script.py
+```
 
 ## How It Works
 
@@ -129,14 +125,16 @@ The script hooks into the following phases of the Proxmox backup process:
 - `backup-start`: Creates and starts the Healthchecks endpoint for the VM/container
 - `pre-stop`, `pre-restart`, `post-restart`: Logs progress during VM/container snapshots
 - `backup-end`: Sends a success ping when a VM/container backup completes
+- `backup-abort`: Sends a failure ping when a VM/container backup is aborted
 - `log-end`: Sends VM/container logs to Healthchecks
-- `job-end`: Sends a success ping when the entire backup job completes
+- `job-end`: Sends a success ping when the entire backup job completes, or a failure ping with the collected error log if any step reported an error
+- `job-abort`: Sends a failure ping when the backup job is aborted
 
 When issues occur, the script captures errors and reports them to Healthchecks.io with detailed logs.
 
 ## Customization
 
-You can customize the script behavior by modifying the variables in `/etc/pve/healthchecks/variables.env`. The most important options are:
+You can customize the script behavior by modifying the variables in `/etc/pve/healthchecks/vzdump-hook-script.env`. The most important options are:
 
 - `HC_BASE_DOMAIN`: Your Healthchecks instance base URL
 - `HC_PING_DOMAIN`: URL for sending pings (usually `HC_BASE_DOMAIN/ping`)
@@ -151,25 +149,19 @@ The grace period is how long a check may be silent before Healthchecks marks it 
 
 ## Upgrading
 
-To upgrade to a newer version:
+To upgrade to a newer version, pull the latest changes on any node in the cluster:
 
-1. Replace the script on each node:
-   ```bash
-   cp vzdump-hook-script.py /usr/local/bin/
-   chmod +x /usr/local/bin/vzdump-hook-script.py
-   ```
+```bash
+git -C /etc/pve/healthchecks pull
+```
 
-2. Update the configuration file if needed:
-   ```bash
-   cp variables.env.example /etc/pve/healthchecks/variables.env
-   # Edit with your settings
-   ```
+Because `/etc/pve` is synchronized across the cluster, the update propagates to all nodes automatically. Your `vzdump-hook-script.env` is not part of the git repository, so it is left untouched by the pull; if a release changes the configuration options, compare against the updated `vzdump-hook-script.env.example` and adjust your file accordingly.
 
 ## Troubleshooting
 
 If you encounter issues:
 
-1. Check the script permissions: `chmod +x /usr/local/bin/vzdump-hook-script.py`
+1. Check the script permissions: `chmod +x /etc/pve/healthchecks/vzdump-hook-script.py`
 2. Verify Python and requests are installed: `python3 -c "import requests"`
 3. Check for errors in the Proxmox task logs
 4. Manually run the script with different phases to test
