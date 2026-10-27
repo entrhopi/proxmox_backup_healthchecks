@@ -208,8 +208,8 @@ def get_domain() -> str:
     except Exception:
         return "local"
 
-HC_SLUG_SUFFIX = f"{NODE.lower()}.{CLUSTER.lower()}.{get_domain().lower()}"
-HC_VM_SLUG_SUFFIX = f"{CLUSTER.lower()}.{get_domain().lower()}"
+DOMAIN = get_domain().lower()
+HC_SLUG_SUFFIX = f"{NODE.lower()}.{DOMAIN}.{CLUSTER.lower()}"
 HC_HOST_SLUG_PREFIX = "job"
 
 # Process command line arguments
@@ -222,7 +222,11 @@ VMID = args.vmid
 
 # Environment variables
 VMTYPE = os.environ.get("VMTYPE", "unknown")
-HC_VM_SLUG_PREFIX = f"{VMID}-{VMTYPE}"
+# VM/LXC slugs are built as: job__<node.domain.cluster>__<type>-<id>
+HC_VM_SLUG_PREFIX = HC_HOST_SLUG_PREFIX
+HC_VM_SLUG_SUFFIX = f"{HC_SLUG_SUFFIX} {VMTYPE.lower()}-{VMID}"
+# Human-readable label used in log ping data
+HC_VM_LABEL = f"{VMTYPE.lower()}-{VMID}"
 
 # DUMPDIR is set for local backups, STOREID for Proxmox Backup Server
 STORAGE = os.environ.get("DUMPDIR", os.environ.get("STOREID", ""))
@@ -549,14 +553,10 @@ def main() -> None:
                 pass
         
         info(f"{PHASE} -- Create {os.environ.get('HOSTNAME', 'unknown')} Endpoint")
-        
+
         # Create endpoint for the VM/LXC
-        domain_cmd = "hostname --domain"
-        domain_result = subprocess.run(domain_cmd, shell=True, capture_output=True, text=True)
-        domain = domain_result.stdout.strip()
-        
         hc_create(
-            name=f"{CLUSTER}.{domain}.{VMTYPE}.{VMID}.{os.environ.get('HOSTNAME', 'unknown')}",
+            name=f"{NODE}.{DOMAIN}.{CLUSTER}.{VMTYPE.lower()}.{VMID}.{os.environ.get('HOSTNAME', 'unknown')}",
             slug_prefix=HC_VM_SLUG_PREFIX,
             grace=3600,
             description=description,
@@ -568,33 +568,33 @@ def main() -> None:
         hc_ping(HC_VM_SLUG_PREFIX, "start", slug_suffix=HC_VM_SLUG_SUFFIX)
 
         info(f"{PHASE} -- Ping Host Log")
-        hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
+        hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_LABEL}")
     
     elif PHASE in ["pre-stop", "pre-restart", "post-restart"]:
         # Send a log ping to the VM/LXC and host endpoints
         info(f"{PHASE} -- Ping {VMTYPE} Log")
-        hc_ping(HC_VM_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}", slug_suffix=HC_VM_SLUG_SUFFIX)
+        hc_ping(HC_VM_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_LABEL}", slug_suffix=HC_VM_SLUG_SUFFIX)
 
         info(f"{PHASE} -- Ping Host Log")
-        hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
+        hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_LABEL}")
     
     elif PHASE == "backup-end":
         # Send success ping to the VM/LXC endpoint
         # and a log ping to the host endpoint
         info(f"{PHASE} -- Ping {VMTYPE} Success")
-        hc_ping(HC_VM_SLUG_PREFIX, data=f"{PHASE}: {HC_VM_SLUG_PREFIX}", slug_suffix=HC_VM_SLUG_SUFFIX)
+        hc_ping(HC_VM_SLUG_PREFIX, data=f"{PHASE}: {HC_VM_LABEL}", slug_suffix=HC_VM_SLUG_SUFFIX)
 
         info(f"{PHASE} -- Ping Host Log")
-        hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
+        hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_LABEL}")
     
     elif PHASE == "backup-abort":
         # Send failure ping to the VM/LXC endpoint
         # and a log ping to the host endpoint
         info(f"{PHASE} -- Ping {VMTYPE} fail")
-        hc_ping(HC_VM_SLUG_PREFIX, "fail", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}", slug_suffix=HC_VM_SLUG_SUFFIX)
+        hc_ping(HC_VM_SLUG_PREFIX, "fail", data=f"{PHASE}: {HC_VM_LABEL}", slug_suffix=HC_VM_SLUG_SUFFIX)
 
         info(f"{PHASE} -- Ping Host Log")
-        hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_SLUG_PREFIX}")
+        hc_ping(HC_HOST_SLUG_PREFIX, "log", data=f"{PHASE}: {HC_VM_LABEL}")
 
         url = get_dashboard_url(HC_VM_SLUG_PREFIX, HC_RW_API_KEY, HC_BASE_DOMAIN, slug_suffix=HC_VM_SLUG_SUFFIX)
         with open(ERRLOG, "a") as f:
